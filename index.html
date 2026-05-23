@@ -987,14 +987,40 @@
         createdAtText: new Date().toLocaleString("zh-TW", { hour12: false })
       };
     }
-    function submitRegistration() {
-      const record = buildRecord();
-      if (!record) return;
-      const list = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      list.push({ ...record, id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) });
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-      showToast("已儲存在本機示範資料庫。");
-    }
+async function submitRegistration() {
+  const record = buildRecord();
+  if (!record) return;
+
+  const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxWpHjR_dEWQPNmgLjJhmLOB9-R_60YEZVMSOXhXHIJsD7P18BRVoQksh7FpwNoxvRz/exec";
+
+  const recordWithId = {
+    ...record,
+    id: (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()),
+    submittedAtISO: new Date().toISOString(),
+    submittedFrom: location.href
+  };
+
+  // 保留本機備份，避免家長網路不穩時資料完全消失
+  const list = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+  list.push(recordWithId);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+
+  try {
+    await fetch(GOOGLE_SCRIPT_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {
+        "Content-Type": "text/plain;charset=utf-8"
+      },
+      body: JSON.stringify(recordWithId)
+    });
+
+    showToast("已送出報名資料。");
+  } catch (error) {
+    console.error(error);
+    showToast("雲端送出失敗，已先儲存在本機。請通知老師檢查網路或資料庫設定。");
+  }
+}
     function clearSelections() {
       if (!confirm("確定要清除全部勾選嗎？學生資料會保留。")) return;
       selections = {};
