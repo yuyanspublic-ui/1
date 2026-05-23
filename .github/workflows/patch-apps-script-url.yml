@@ -1,3 +1,4 @@
+# trigger: 2026-05-24 apps-script-url-patch
 name: Patch Apps Script URL
 
 on:
