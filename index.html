@@ -481,7 +481,7 @@
 
     <section class="panel admin-area">
       <h2 class="panel-title"><span class="bar"></span>擁有者查詢區</h2>
-      <div class="notice">正式收單建議使用 Google 試算表查看資料；下方查詢區只讀取「目前這台電腦／瀏覽器」的本機備份，無法看到所有家長送出的雲端資料。</div>
+      <div class="notice">未設定 Firebase 時，本頁以本機瀏覽器示範資料庫運作。正式上線可改接 Firebase Auth 與 Firestore 安全規則。</div>
       <div class="admin-controls">
         <input id="adminPassword" type="password" placeholder="管理密碼">
         <button class="btn dark" type="button" onclick="loadAdminRecords()">查詢報名資料</button>
@@ -499,9 +499,9 @@
     const GENERATED_AT = "2026-05-23 08:47";
     const ADMIN_DEMO_PASSWORD = "owner2026";
     const STORAGE_KEY = "summer2026Registrations_v5";
-    // 雲端資料庫網址：請貼上 Google Apps Script「部署後的 Web app URL」。
-    // 沒貼之前仍可部署到 GitHub Pages，但送出資料只會備份在家長自己的瀏覽器。
-    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxWpHjR_dEWQPNmgLjJhmLOB9-R_60YEZVMSOXhXHIJsD7P18BRVoQksh7FpwNoxvRz/exec";
+    // 雲端資料庫網址：完成 Google Apps Script 部署後，請把 /exec 網址貼在雙引號內。
+    // 尚未貼上網址前，送出資料只會備份在填表者自己的瀏覽器，擁有者不會收到集中資料。
+    const GOOGLE_SCRIPT_URL = "";
     const MEAL_PRICE = 70;
     const POKEMON_MATERIAL = 800;
     const BLOCK_RENTAL = 300;
@@ -512,198 +512,251 @@
     const PERIOD_LABELS = { outdoor: "戶外活動", morning: "上午班", afternoon: "下午班", evening: "傍晚班" };
     const PERIOD_TIMES = { outdoor: "星期二限定", morning: "9:00-11:00", afternoon: "2:00-4:00", evening: "4:00-5:30" };
     const MONTH_LABELS = { "2026-07": "7月", "2026-08": "8月" };
-    const COURSE_PRICE_RULES = [
-      { name: "戶外活動", price: 1500 },
-      { name: "究識科普通", price: 250 }, { name: "悅讀台灣通", price: 250 }, { name: "經典文學班", price: 250 },
-      { name: "因材思教數學", price: 350 }, { name: "美語入門班", price: 350 }, { name: "美語新手班", price: 350 }, { name: "美語基礎班", price: 350 }, { name: "美語中階班", price: 350 }, { name: "美語高階班", price: 350 }, { name: "美語銜接班", price: 350 },
-      { name: "寶可夢策略卡牌", price: 300 }, { name: "巧智球", price: 300 }, { name: "scratch+遊戲機", price: 300 }, { name: "scratch格鬥魂", price: 300 }, { name: "scratch格鬥程式", price: 300 },
-      { name: "圍棋", price: 300 }, { name: "數字積木", price: 300 }, { name: "vibe coding", price: 300 }, { name: "扯鈴", price: 300 }, { name: "AI繪本創作營", price: 300 }, { name: "AI故事影片創作營", price: 300 }, { name: "麥塊程式", price: 300 }, { name: "樂樂棒", price: 300 }, { name: "AI經典小遊戲創作營", price: 300 },
-      { name: "烘培魔法村", price: 250 }, { name: "藝術maker", price: 250 }, { name: "體適能訓練", price: 250 }, { name: "桌遊邏輯戰", price: 250 }, { name: "大英博物館", price: 250 }, { name: "3D列印筆", price: 250 },
-      { name: "新賽季預修煉", price: 250 }
-    ];
-    const SPLIT_COURSE_NAMES = {
-      "新賽季預修煉國語科": ["新賽季預修煉", "國語科"],
-      "新賽季預修煉自然科": ["新賽季預修煉", "自然科"],
-      "新賽季預修煉社會科": ["新賽季預修煉", "社會科"],
-      "AI故事影片創作營": ["AI故事影片", "創作營"],
-      "AI經典小遊戲創作營": ["AI 經典小遊戲", "創作營"]
-    };
-    let selections = {};
-    let meals = {};
-    let addOns = { buyDiabolo: false };
-    let sessionMap = new Map();
 
-    function normalizeCourse(name) { return String(name || "").trim().toLowerCase().replace(/\s+/g, " "); }
+    let selections = {};   // date -> {outdoor, morning, afternoon, evening}
+    let meals = {};        // date -> true when manually chosen
+    let addOns = { buyDiabolo: false };
+    let sessionMap = {};
+
+    function normalizeCourse(name) {
+      return String(name || "").trim().replace(/\s+/g, " ");
+    }
     function getCoursePrice(course, period) {
-      if (period === "outdoor") return 1500;
-      const c = normalizeCourse(course);
-      const exact = COURSE_PRICE_RULES.find(rule => normalizeCourse(rule.name) === c);
-      if (exact) return exact.price;
-      const partial = COURSE_PRICE_RULES.find(rule => c.includes(normalizeCourse(rule.name)) || normalizeCourse(rule.name).includes(c));
-      return partial ? partial.price : 300;
+      const name = normalizeCourse(course);
+      if (period === "outdoor") return 1000;
+      if (name.includes("因材思教數學")) return 250;
+      if (name.includes("科普") || name.includes("究識科普") || name.includes("悅讀台灣") || name.includes("烘培") || name.includes("藝術") || name.includes("成語") || name.includes("預修煉") || name.includes("歡唱")) return 200;
+      if (name.includes("美語") || name.includes("圍棋進階")) return 0;
+      if (name.includes("巧智球") || name.includes("scratch") || name.includes("格鬥魂") || name.includes("數字積木") || name.includes("vibe coding") || name.includes("寶可夢") || name.includes("圍棋中階") || name.includes("扯鈴") || name.startsWith("AI") || name.includes("麥塊") || name.includes("樂樂棒")) return 300;
+      return 0;
     }
-    function formatMoney(n) { return "$" + Number(n || 0).toLocaleString("zh-TW"); }
-    function escapeHtml(str) { return String(str ?? "").replace(/[&<>"']/g, s => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[s])); }
-    function courseNameLines(name) { return SPLIT_COURSE_NAMES[name] || [name]; }
-    function formatCourseNameHtml(name) {
-      return `<span class="course-name">${courseNameLines(name).map(line => `<span class="course-line">${escapeHtml(line)}</span>`).join("")}</span>`;
+    function formatMoney(value) {
+      return "$" + Number(value || 0).toLocaleString("zh-TW");
     }
-    function showToast(msg) {
-      const el = document.getElementById("toast");
-      el.textContent = msg;
-      el.classList.add("show");
-      clearTimeout(showToast.timer);
-      showToast.timer = setTimeout(() => el.classList.remove("show"), 2600);
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
     }
-    function monthKey(date) { return String(date).slice(0, 7); }
+    function courseNameLines(course) {
+      const name = normalizeCourse(course);
+      const season = name.match(/^新賽季預修煉(.+科)$/);
+      if (season) return ["新賽季預修煉", season[1]];
+      if (name === "AI故事影片創作營") return ["AI故事影片", "創作營"];
+      if (name === "AI 經典小遊戲創作營") return ["AI 經典小遊戲", "創作營"];
+      return [name];
+    }
+    function formatCourseNameHtml(course) {
+      return courseNameLines(course).map(line => `<span class="course-line">${escapeHtml(line)}</span>`).join("");
+    }
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => toast.classList.remove("show"), 2500);
+    }
+    function monthKey(date) {
+      return date.slice(0, 7);
+    }
     function normalizeRoutesForDisplay() {
-      WEEKS.forEach(week => week.days.forEach(day => {
-        ["morning", "afternoon"].forEach(period => {
-          (day.sessions[period] || []).forEach(s => {
-            if (s.route === "星期二上午課程" || s.route === "星期二下午課程") s.route = PERIOD_LABELS[period];
+      WEEKS.forEach(week => {
+        week.days.forEach(day => {
+          (day.sessions.morning || []).forEach(s => {
+            const c = normalizeCourse(s.course);
+            if (day.weekday === "星期二" && (c.includes("究識科普通") || c.includes("悅讀台灣通"))) s.route = "藝文航班";
+          });
+          (day.sessions.afternoon || []).forEach(s => {
+            const c = normalizeCourse(s.course);
+            if (day.weekday === "星期二" && c.includes("新賽季預修煉")) s.route = "標的航班";
           });
         });
-      }));
+      });
     }
     function initSessionMap() {
-      sessionMap = new Map();
-      WEEKS.forEach(week => week.days.forEach(day => PERIODS.forEach(period => (day.sessions[period] || []).forEach(s => sessionMap.set(s.id, s)))));
+      sessionMap = {};
+      WEEKS.forEach(week => {
+        week.days.forEach(day => {
+          PERIODS.forEach(period => {
+            (day.sessions[period] || []).forEach(session => {
+              sessionMap[session.id] = session;
+            });
+          });
+        });
+      });
     }
-    function makeDaySelection(date) { if (!selections[date]) selections[date] = {}; return selections[date]; }
-    function chooseSession(date, period, id) {
-      const daySel = makeDaySelection(date);
-      if (daySel[period] === id) delete daySel[period]; else daySel[period] = id;
-      cleanupSelections(date);
+    function getSession(id) {
+      return sessionMap[id];
+    }
+    function getRoutesForWeek(week, period) {
+      const routes = [];
+      week.days.forEach(day => {
+        (day.sessions[period] || []).forEach(session => {
+          if (!routes.includes(session.route)) routes.push(session.route);
+        });
+      });
+      return routes;
+    }
+    function getSessionForRoute(day, period, route) {
+      return (day.sessions[period] || []).find(session => session.route === route);
+    }
+    function renderSchedule() {
+      const container = document.getElementById("scheduleContainer");
+      container.innerHTML = WEEKS.map(week => renderWeek(week)).join("");
+    }
+    function renderWeek(week) {
+      return `
+        <article class="week-card">
+          <div class="week-head">
+            <div><h2>第 ${week.weekNum} 週</h2><small>${week.startDate} ～ ${week.endDate}</small></div>
+            <small>${week.days.map(d => d.monthDay).join("、")}</small>
+          </div>
+          <div class="table-scroll single-week-table">
+            ${renderCourseTable(week)}
+          </div>
+        </article>
+      `;
+    }
+    function renderCourseTable(week) {
+      const dayCount = week.days.length;
+      const colCount = dayCount + 1;
+      const rows = [];
+      rows.push(`<div class="cell head">航班 / 日期</div>`);
+      week.days.forEach(day => {
+        const mealBtn = `<button class="meal-btn ${mealSelected(day.date) ? (isFullDay(day.date) ? "auto" : "on") : ""}" ${isFullDay(day.date) ? "disabled" : ""} onclick="toggleMeal('${day.date}')">${mealSelected(day.date) ? "已含餐" : "加午餐"}</button>`;
+        rows.push(`<div class="cell head"><div class="date">${day.monthDay}</div><div class="weekday">${day.weekday}</div>${mealBtn}</div>`);
+      });
+
+      PERIODS.forEach(period => {
+        const routes = getRoutesForWeek(week, period);
+        routes.forEach((route, routeIndex) => {
+          const startClass = routeIndex === 0 ? "period-start" : "";
+          rows.push(`<div class="cell route route-${period} ${startClass}">${PERIOD_LABELS[period]}<small>${PERIOD_TIMES[period]}｜${escapeHtml(route)}</small></div>`);
+          week.days.forEach(day => {
+            const session = getSessionForRoute(day, period, route);
+            if (!session) {
+              rows.push(`<div class="cell ${period} ${startClass}"><span class="empty-cell">—</span></div>`);
+              return;
+            }
+            const isSelected = selections[day.date]?.[period] === session.id;
+            const disabled = isOutdoorLocked(day.date, period);
+            rows.push(`
+              <div class="cell ${period} ${startClass}">
+                <button class="course-choice ${period} ${isSelected ? "selected" : ""} ${disabled ? "disabled" : ""}" onclick="toggleCourse('${day.date}', '${period}', '${session.id}')">
+                  <span class="course-name">${formatCourseNameHtml(session.course)}</span>
+                  <span class="price">${formatMoney(getCoursePrice(session.course, session.period))}</span>
+                </button>
+              </div>
+            `);
+          });
+        });
+      });
+
+      return `<div class="course-table" style="grid-template-columns: 155px repeat(${dayCount}, minmax(150px, 1fr)); --col-count:${colCount};">${rows.join("")}</div>`;
+    }
+    function toggleCourse(date, period, id) {
+      if (!selections[date]) selections[date] = {};
+      if (selections[date][period] === id) delete selections[date][period];
+      else selections[date][period] = id;
+      if (period === "outdoor" && selections[date][period]) {
+        delete selections[date].morning;
+        delete selections[date].afternoon;
+        meals[date] = true;
+      }
+      if ((period === "morning" || period === "afternoon") && selections[date]?.outdoor) delete selections[date].outdoor;
+      if (!Object.keys(selections[date]).length) delete selections[date];
       renderSchedule();
       updateSummary();
     }
-    function cleanupSelections(date) {
-      const daySel = selections[date] || {};
-      if (daySel.outdoor) {
-        delete daySel.morning;
-        delete daySel.afternoon;
-        meals[date] = true;
-      }
-      if (!Object.keys(daySel).length) delete selections[date];
+    function isOutdoorLocked(date, period) {
+      return Boolean(selections[date]?.outdoor && (period === "morning" || period === "afternoon"));
     }
-    function selected(date, period, id) { return selections[date] && selections[date][period] === id; }
-    function isOutdoorLocked(date, period) { return period !== "outdoor" && selections[date]?.outdoor && (period === "morning" || period === "afternoon"); }
-    function isFullDay(date) { return Boolean(selections[date]?.outdoor); }
-    function hasAnySelected(date) { return Boolean(selections[date] && Object.keys(selections[date]).length); }
-    function mealSelected(date) { return isFullDay(date) || Boolean(meals[date]); }
+    function isFullDay(date) {
+      return Boolean(selections[date]?.outdoor || (selections[date]?.morning && selections[date]?.afternoon));
+    }
+    function mealSelected(date) {
+      return Boolean(meals[date] || isFullDay(date));
+    }
     function toggleMeal(date) {
       if (isFullDay(date)) return;
       meals[date] = !meals[date];
-      if (!meals[date]) delete meals[date];
       updateSummary();
       renderSchedule();
     }
     function getSelectedSessions() {
-      const list = [];
-      Object.values(selections).forEach(daySel => Object.values(daySel).forEach(id => {
-        const s = sessionMap.get(id);
-        if (s) list.push(s);
-      }));
-      return list.sort((a,b) => (a.date + PERIODS.indexOf(a.period)).localeCompare(b.date + PERIODS.indexOf(b.period)));
+      const sessions = [];
+      Object.entries(selections).forEach(([date, byPeriod]) => {
+        PERIODS.forEach(period => {
+          const id = byPeriod[period];
+          if (id && getSession(id)) sessions.push(getSession(id));
+        });
+      });
+      return sessions.sort((a, b) => `${a.date}-${PERIODS.indexOf(a.period)}`.localeCompare(`${b.date}-${PERIODS.indexOf(b.period)}`));
+    }
+    function getMealDates() {
+      const set = new Set();
+      Object.keys(selections).forEach(date => {
+        if (mealSelected(date)) set.add(date);
+      });
+      return [...set].sort();
     }
     function getDateMeta(date) {
-      for (const week of WEEKS) for (const day of week.days) if (day.date === date) return day;
-      return { date, weekday: "", monthDay: date };
+      for (const week of WEEKS) {
+        const found = week.days.find(day => day.date === date);
+        if (found) return found;
+      }
+      return { date, monthDay: date, weekday: "" };
     }
-    function isMiddayMealDate(date) {
-      const sel = selections[date] || {};
-      return Boolean(sel.morning && sel.afternoon) || Boolean(sel.outdoor);
-    }
-    function mealCanToggle(date) { return hasAnySelected(date) && !isFullDay(date); }
-
-    function getRoutesForWeek(week, period) {
-      const set = new Set();
-      week.days.forEach(day => (day.sessions[period] || []).forEach(s => set.add(s.route)));
-      return Array.from(set);
-    }
-    function getSessionFor(day, period, route) {
-      return (day.sessions[period] || []).find(s => s.route === route);
-    }
-    function renderWeekPeriodTable(week, period) {
-      const routes = getRoutesForWeek(week, period);
-      if (!routes.length) return "";
-      const cols = week.days.length + 1;
-      const tableStyle = `grid-template-columns: minmax(130px, .9fr) repeat(${week.days.length}, minmax(120px, 1fr)); --col-count:${cols};`;
-      return `
-        <section class="period-section ${period}">
-          <div class="period-title"><span>${PERIOD_LABELS[period]}</span><small>${PERIOD_TIMES[period]}</small></div>
-          <div class="table-scroll">
-            <div class="course-table" style="${tableStyle}">
-              <div class="cell head"><span>航班／日期</span></div>
-              ${week.days.map(day => `<div class="cell head"><span class="date">${day.monthDay}</span><span class="weekday">${day.weekday}</span>${period !== "outdoor" && mealCanToggle(day.date) ? `<button type="button" class="meal-btn ${mealSelected(day.date) ? "on" : ""}" onclick="toggleMeal('${day.date}')">${mealSelected(day.date) ? "已加餐" : "+餐"}</button>` : ""}</div>`).join("")}
-              ${routes.map(route => `
-                <div class="cell route route-${period} period-start">${escapeHtml(route)}<small>${PERIOD_LABELS[period]}</small></div>
-                ${week.days.map(day => {
-                  const s = getSessionFor(day, period, route);
-                  if (!s) return `<div class="cell period-start ${period}"><span class="empty-cell">—</span></div>`;
-                  const cls = ["course-choice", period, selected(day.date, period, s.id) ? "selected" : "", isOutdoorLocked(day.date, period) ? "disabled" : ""].join(" ");
-                  return `<div class="cell period-start ${period}"><button type="button" class="${cls}" onclick="chooseSession('${day.date}','${period}','${s.id}')">${formatCourseNameHtml(s.course)}<span class="price">${formatMoney(getCoursePrice(s.course, period))}</span></button></div>`;
-                }).join("")}
-              `).join("")}
-            </div>
-          </div>
-        </section>`;
-    }
-    function renderWeekCard(week) {
-      return `<article class="week-card">
-        <div class="week-head"><div><h2>第 ${week.weekNum} 週</h2><small>${week.startDate} ～ ${week.endDate}</small></div><small>點選課程即可勾選／取消</small></div>
-        ${PERIODS.map(period => renderWeekPeriodTable(week, period)).join("")}
-      </article>`;
-    }
-    function renderSchedule() { document.getElementById("scheduleContainer").innerHTML = WEEKS.map(renderWeekCard).join(""); }
-
     function calculateFees() {
       const sessions = getSelectedSessions();
+      const mealDates = getMealDates();
       const lines = { "2026-07": [], "2026-08": [] };
       const addLine = (month, type, name, qty, unit, amount, meta="") => {
         if (!lines[month]) lines[month] = [];
         lines[month].push({ month, type, name, qty, unit, amount, meta });
       };
-      sessions.forEach(s => addLine(monthKey(s.date), "course", `${s.monthDay} ${s.periodName} ${s.course}`, 1, getCoursePrice(s.course, s.period), getCoursePrice(s.course, s.period), `${s.route}`));
-      const mealDates = Object.keys(meals).filter(d => meals[d]).sort();
+
+      sessions.forEach(session => {
+        const price = getCoursePrice(session.course, session.period);
+        addLine(monthKey(session.date), "course", `${session.monthDay} ${session.periodName} ${session.course}`, 1, price, price, session.route);
+      });
       mealDates.forEach(date => {
         const meta = getDateMeta(date);
         addLine(monthKey(date), "meal", `${meta.monthDay} 餐費`, 1, MEAL_PRICE, MEAL_PRICE, meta.weekday);
       });
-      const pokemonByMonth = {};
-      sessions.filter(s => s.course.includes("寶可夢")).forEach(s => pokemonByMonth[monthKey(s.date)] = (pokemonByMonth[monthKey(s.date)] || 0) + 1);
-      Object.entries(pokemonByMonth).forEach(([month, count]) => addLine(month, "material", "寶可夢策略卡牌教材費", count, POKEMON_MATERIAL, count * POKEMON_MATERIAL));
-      const blockByMonth = {};
-      sessions.filter(s => s.course.includes("數字積木")).forEach(s => blockByMonth[monthKey(s.date)] = (blockByMonth[monthKey(s.date)] || 0) + 1);
-      Object.entries(blockByMonth).forEach(([month, count]) => addLine(month, "material", "數字積木教具租借費", count, BLOCK_RENTAL, count * BLOCK_RENTAL));
-      const yincaiByMonth = {};
-      sessions.filter(s => s.course.includes("因材思教數學")).forEach(s => yincaiByMonth[monthKey(s.date)] = (yincaiByMonth[monthKey(s.date)] || 0) + 1);
-      Object.entries(yincaiByMonth).forEach(([month, count]) => {
-        const groups = Math.ceil(count / 8);
-        if (groups) addLine(month, "material", "因材思教數學教材費", groups, YINCAI_MATERIAL_EVERY_8, groups * YINCAI_MATERIAL_EVERY_8, `${count}堂，每8堂收一次`);
+
+      const countByCourseMonth = (keyword) => {
+        const result = {};
+        sessions.forEach(s => {
+          if (normalizeCourse(s.course).includes(keyword)) {
+            const m = monthKey(s.date);
+            result[m] = (result[m] || 0) + 1;
+          }
+        });
+        return result;
+      };
+      Object.entries(countByCourseMonth("寶可夢")).forEach(([month, qty]) => addLine(month, "material", "寶可夢卡排對戰教材費", qty, POKEMON_MATERIAL, qty * POKEMON_MATERIAL, "每堂課一份教材"));
+      Object.entries(countByCourseMonth("數字積木")).forEach(([month, qty]) => addLine(month, "material", "數字積木租借費", qty, BLOCK_RENTAL, qty * BLOCK_RENTAL, "每堂課租借"));
+      Object.entries(countByCourseMonth("因材思教數學")).forEach(([month, qty]) => {
+        const groups = Math.ceil(qty / 8);
+        if (groups > 0) addLine(month, "material", "因材思教教材費", groups, YINCAI_MATERIAL_EVERY_8, groups * YINCAI_MATERIAL_EVERY_8, `${qty} 堂，每 8 堂收一次`);
       });
-      const hasDiabolo = sessions.some(s => s.course.includes("扯鈴"));
+      const hasDiabolo = sessions.some(s => normalizeCourse(s.course).includes("扯鈴"));
       if (hasDiabolo && addOns.buyDiabolo) {
-        const firstMonth = monthKey(sessions.find(s => s.course.includes("扯鈴")).date);
-        addLine(firstMonth, "material", "扯鈴代購費（9折）", 1, DIABOLO_BUY_PRICE, DIABOLO_BUY_PRICE);
+        const first = sessions.find(s => normalizeCourse(s.course).includes("扯鈴"));
+        addLine(monthKey(first.date), "material", "扯鈴代購費（9折）", 1, DIABOLO_BUY_PRICE, DIABOLO_BUY_PRICE, "原價950元" );
       }
+
       const monthTotals = {};
-      Object.keys(lines).forEach(month => monthTotals[month] = lines[month].reduce((sum, item) => sum + item.amount, 0));
-      const selectedDateCount = new Set([...sessions.map(s => s.date), ...mealDates]).size;
-      return { sessions, mealDates, lines, monthTotals, total: Object.values(monthTotals).reduce((a,b)=>a+b,0), selectedDateCount, selectedSessionCount: sessions.length, hasDiabolo };
-    }
-    function validateInsuranceInfo() {
-      const hasOutdoor = getSelectedSessions().some(s => s.period === "outdoor");
-      const box = document.getElementById("insuranceFields");
-      box.classList.toggle("show", hasOutdoor);
-      if (!hasOutdoor) return { idNumber: "", birthDate: "" };
-      const idNumber = document.getElementById("studentIdNumber").value.trim();
-      const birthDate = document.getElementById("studentBirthDate").value;
-      if (!idNumber || !birthDate) {
-        showToast("參加戶外活動需填寫身分證字號與出生年月日，方便辦理保險。");
-        return null;
-      }
-      return { idNumber, birthDate };
+      Object.keys(lines).forEach(month => monthTotals[month] = lines[month].reduce((sum, line) => sum + line.amount, 0));
+      const selectedDates = new Set([...sessions.map(s => s.date), ...mealDates]);
+      return {
+        sessions, mealDates, lines, monthTotals,
+        selectedDateCount: selectedDates.size,
+        selectedSessionCount: sessions.length,
+        total: Object.values(monthTotals).reduce((sum, v) => sum + v, 0),
+        hasDiabolo
+      };
     }
     function updateSummary() {
       const fee = calculateFees();
@@ -711,23 +764,25 @@
       document.getElementById("selectedSessionCount").textContent = fee.selectedSessionCount;
       document.getElementById("julyTotal").textContent = formatMoney(fee.monthTotals["2026-07"] || 0);
       document.getElementById("augustTotal").textContent = formatMoney(fee.monthTotals["2026-08"] || 0);
-      document.getElementById("insuranceFields").classList.toggle("show", fee.sessions.some(s => s.period === "outdoor"));
       renderFeeBreakdown(fee);
       renderCalendarSummary(fee);
+      document.getElementById("insuranceFields").classList.toggle("show", fee.sessions.some(s => s.period === "outdoor"));
+    }
+    function lineTypeLabel(type) {
+      return { course: "課程費", material: "教材費", meal: "餐費" }[type] || type;
+    }
+    function sortFeeLines(lines) {
+      const order = { course: 1, material: 2, meal: 3 };
+      return [...lines].sort((a, b) => (order[a.type] || 9) - (order[b.type] || 9) || a.name.localeCompare(b.name));
     }
     function getMonthCategorySummary(linesByMonth, month) {
       const list = linesByMonth[month] || [];
       return {
-        courseFee: list.filter(i => i.type === "course").reduce((s,i)=>s+i.amount,0),
-        materialFee: list.filter(i => i.type === "material").reduce((s,i)=>s+i.amount,0),
-        mealFee: list.filter(i => i.type === "meal").reduce((s,i)=>s+i.amount,0),
-        total: list.reduce((s,i)=>s+i.amount,0)
+        courseFee: list.filter(i => i.type === "course").reduce((s, i) => s + i.amount, 0),
+        materialFee: list.filter(i => i.type === "material").reduce((s, i) => s + i.amount, 0),
+        mealFee: list.filter(i => i.type === "meal").reduce((s, i) => s + i.amount, 0),
+        total: list.reduce((s, i) => s + i.amount, 0)
       };
-    }
-    function lineTypeLabel(type) { return {course:"課程費", material:"教材／代購／租借", meal:"餐費"}[type] || type; }
-    function sortFeeLines(lines) {
-      const order = { course: 1, material: 2, meal: 3 };
-      return [...lines].sort((a,b) => (order[a.type] || 9) - (order[b.type] || 9) || a.name.localeCompare(b.name));
     }
     function renderFeeDetailRows(lines, forPrint=false) {
       if (!lines.length) return `<tr><td class="empty-fee" colspan="5">本月尚未產生費用</td></tr>`;
@@ -785,59 +840,57 @@
       `;
     }
     function renderCalendarSummary(fee) {
-      const grouped = {};
+      const byDate = {};
       fee.sessions.forEach(s => {
-        if (!grouped[s.date]) grouped[s.date] = [];
-        grouped[s.date].push(s);
+        if (!byDate[s.date]) byDate[s.date] = [];
+        byDate[s.date].push({ type: "course", ...s });
       });
       fee.mealDates.forEach(date => {
-        if (!grouped[date]) grouped[date] = [];
-        grouped[date].push({ date, period: "meal", periodName: "餐費", route: "餐費", course: "餐費", mealOnly: true });
+        if (!byDate[date]) byDate[date] = [];
+        const meta = getDateMeta(date);
+        byDate[date].push({ type: "meal", date, monthDay: meta.monthDay, weekday: meta.weekday, periodName: "餐費", course: "午餐" });
       });
-      Object.keys(grouped).forEach(date => {
-        grouped[date].sort((a,b) => PERIODS.concat(["meal"]).indexOf(a.period) - PERIODS.concat(["meal"]).indexOf(b.period));
-      });
-
-      const usedWeeks = WEEKS.map(week => ({
-        ...week,
-        days: week.days.filter(day => grouped[day.date])
-      })).filter(week => week.days.length);
-
-      document.getElementById("calendarSummary").innerHTML = usedWeeks.length ? usedWeeks.map(week => `
-        <section class="summary-week">
-          <h3>第 ${week.weekNum} 週</h3>
-          <div class="summary-days">
-            ${week.days.map(day => `
-              <div class="summary-day">
-                <div class="summary-date">${day.monthDay} ${day.weekday}</div>
-                ${grouped[day.date].map(s => `
-                  <div class="summary-item ${s.period}">
-                    ${formatCourseNameHtml(s.course)}
-                    <small>${escapeHtml(s.periodName || "")}</small>
-                  </div>
-                `).join("")}
-              </div>
-            `).join("")}
-          </div>
-        </section>
-      `).join("") : `<div class="summary-empty">尚未勾選課程。</div>`;
-    }
-
-    function getStudentInfo() {
-      return {
-        studentName: document.getElementById("studentName").value.trim(),
-        parentPhone: document.getElementById("parentPhone").value.trim(),
-        schoolName: document.getElementById("schoolName").value.trim(),
-        grade: document.getElementById("grade").value.trim()
-      };
+      const dates = Object.keys(byDate).sort();
+      const target = document.getElementById("calendarSummary");
+      if (!dates.length) {
+        target.innerHTML = `<div class="summary-empty">尚未勾選課程。</div>`;
+        return;
+      }
+      const weeksHtml = WEEKS.map(week => {
+        const weekDates = week.days.map(d => d.date).filter(d => byDate[d]);
+        if (!weekDates.length) return "";
+        return `<div class="summary-week"><h3>第 ${week.weekNum} 週</h3><div class="summary-days">
+          ${weekDates.map(date => {
+            const meta = getDateMeta(date);
+            return `<div class="summary-day"><div class="summary-date">${meta.monthDay} ${meta.weekday}</div>
+              ${byDate[date].map(item => `<div class="summary-item ${item.type === "meal" ? "meal" : ""}">${formatCourseNameHtml(item.course)}<small>${item.periodName}</small></div>`).join("")}
+            </div>`;
+          }).join("")}
+        </div></div>`;
+      }).join("");
+      target.innerHTML = weeksHtml;
     }
     function validateStudentInfo() {
-      const info = getStudentInfo();
-      if (!info.studentName || !info.parentPhone || !info.schoolName || !info.grade) {
+      const studentName = document.getElementById("studentName").value.trim();
+      const parentPhone = document.getElementById("parentPhone").value.trim();
+      const schoolName = document.getElementById("schoolName").value.trim();
+      const grade = document.getElementById("grade").value.trim();
+      if (!studentName || !parentPhone || !schoolName || !grade) {
         showToast("請先填寫學生姓名、家長電話、就讀學校與年級。");
         return null;
       }
-      return info;
+      return { studentName, parentPhone, schoolName, grade };
+    }
+    function validateInsuranceInfo() {
+      const hasOutdoor = getSelectedSessions().some(s => s.period === "outdoor");
+      if (!hasOutdoor) return { idNumber: "", birthDate: "" };
+      const idNumber = document.getElementById("studentIdNumber").value.trim();
+      const birthDate = document.getElementById("studentBirthDate").value;
+      if (!idNumber || !birthDate) {
+        showToast("參加戶外活動需填寫身分證字號與出生年月日，方便辦理保險。");
+        return null;
+      }
+      return { idNumber, birthDate };
     }
     function buildRecord() {
       const info = validateStudentInfo();
@@ -872,18 +925,18 @@
 
       const recordWithId = {
         ...record,
-        id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
-        submittedFrom: location.href,
-        submittedAtISO: new Date().toISOString()
+        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+        submittedAtISO: new Date().toISOString(),
+        submittedFrom: location.href
       };
 
-      // 先做一份本機備份，避免家長網路瞬斷時資料完全消失。
+      // 先存一份在填表者自己的瀏覽器，避免網路瞬斷導致資料完全消失。
       const list = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
       list.push(recordWithId);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
 
-      if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes("PASTE")) {
-        showToast("目前尚未設定雲端資料庫網址；資料已先備份在此瀏覽器。請完成 Google 試算表設定後再正式收單。");
+      if (!GOOGLE_SCRIPT_URL || !GOOGLE_SCRIPT_URL.startsWith("https://script.google.com/macros/s/")) {
+        showToast("尚未設定雲端資料庫網址；資料目前只備份在這台裝置。請完成 Google 試算表 Apps Script 設定。");
         return;
       }
 
@@ -894,10 +947,10 @@
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify(recordWithId)
         });
-        showToast("已送出報名資料到雲端試算表，並已保留本機備份。");
-      } catch (err) {
-        console.error(err);
-        showToast("雲端送出失敗；資料已先備份在此瀏覽器，請截圖或稍後再送。");
+        showToast("已送出報名資料到雲端試算表，並保留本機備份。");
+      } catch (error) {
+        console.error(error);
+        showToast("雲端送出失敗；資料已先備份在這台裝置，請檢查網路或資料庫網址。");
       }
     }
     function clearSelections() {
@@ -948,7 +1001,7 @@
         if (!grouped[s.date]) grouped[s.date] = [];
         grouped[s.date].push(s);
       });
-      Object.keys(grouped).forEach(date => grouped[date].sort((a,b) => PERIODS.indexOf(a.period) - PERIODS.indexOf(b.period)));
+      Object.keys(grouped).forEach(date => grouped[date].sort((a, b) => PERIODS.indexOf(a.period) - PERIODS.indexOf(b.period)));
       const usedWeeks = WEEKS.map(week => ({...week, days: week.days.filter(day => grouped[day.date])})).filter(week => week.days.length);
 
       document.getElementById("printArea").innerHTML = `
@@ -999,7 +1052,7 @@
     function loadAdminRecords() {
       const password = document.getElementById("adminPassword").value;
       if (password !== ADMIN_DEMO_PASSWORD) {
-        showToast("管理密碼錯誤。提醒：此區只查本機備份；正式雲端資料請到 Google 試算表查看。");
+        showToast("管理密碼錯誤。");
         return;
       }
       const records = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]").reverse();
@@ -1036,7 +1089,7 @@
       }
       const records = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
       if (!records.length) {
-        showToast("本機目前沒有可匯出的備份資料；正式雲端資料請到 Google 試算表查看。");
+        showToast("本機目前沒有可匯出的資料。");
         return;
       }
       const header = ["時間", "學生姓名", "家長電話", "就讀學校", "年級", "身分證字號", "出生年月日", "勾選日期", "堂數", "7月合計", "8月合計", "總金額", "課程明細"];
