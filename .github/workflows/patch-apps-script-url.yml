@@ -1,0 +1,94 @@
+name: Patch Apps Script URL
+
+on:
+  push:
+    paths:
+      - ".github/workflows/patch-apps-script-url.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-index:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Patch only registration submission
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+          url = 'https://script.google.com/macros/s/AKfycbxWpHjR_dEWQPNmgLjJhmLOB9-R_60YEZVMSOXhXHIJsD7P18BRVoQksh7FpwNoxvRz/exec'
+
+          if 'GOOGLE_SCRIPT_URL' not in s:
+              s = s.replace(
+                  '    const STORAGE_KEY = "summer2026Registrations_v5";\n',
+                  '    const STORAGE_KEY = "summer2026Registrations_v5";\n'
+                  f'    const GOOGLE_SCRIPT_URL = "{url}";\n'
+              )
+          else:
+              s = re.sub(
+                  r'const GOOGLE_SCRIPT_URL = "[^"]*";',
+                  f'const GOOGLE_SCRIPT_URL = "{url}";',
+                  s,
+                  count=1
+              )
+
+          old = '''    function submitRegistration() {
+      const record = buildRecord();
+      if (!record) return;
+      const list = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+      list.push({ ...record, id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      showToast("已儲存在本機示範資料庫。");
+    }'''
+
+          new = '''    async function submitRegistration() {
+      const record = buildRecord();
+      if (!record) return;
+      const recordWithId = {
+        ...record,
+        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+        submittedAtISO: new Date().toISOString(),
+        submittedFrom: location.href
+      };
+      const list = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+      list.push(recordWithId);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      try {
+        await fetch(GOOGLE_SCRIPT_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(recordWithId)
+        });
+        showToast("已送出報名資料。");
+      } catch (error) {
+        console.error(error);
+        showToast("雲端送出失敗，已先儲存在本機。請通知老師檢查網路或資料庫設定。");
+      }
+    }'''
+
+          if old not in s:
+              raise SystemExit('Target submitRegistration block not found. index.html was not changed.')
+
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Commit patched index
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Connect registration form to Apps Script"
+            git push
+          fi
